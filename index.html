@@ -137,6 +137,10 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
 .primary { background: var(--accent); color: #001418; box-shadow: 0 0 14px var(--accent), 0 0 32px rgba(0,240,255,0.45); }
 .ghost:hover { box-shadow: 0 0 12px rgba(0,240,255,0.4); }
 .frame { box-shadow: 0 0 0 1px rgba(0,240,255,0.5), 0 0 28px rgba(0,240,255,0.3), 0 0 60px rgba(255,43,214,0.2); }
+.live { display: grid; gap: 12px; border: 1px solid rgba(255,43,214,0.45); border-radius: 12px; padding: 14px; box-shadow: 0 0 16px rgba(255,43,214,0.15); }
+.live h2 { font-family: var(--display); font-weight: 400; font-size: 1.5rem; letter-spacing: 0.03em; margin: 0; color: var(--hot); text-shadow: 0 0 12px var(--hot); }
+.live-status { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.live-status.ok { color: #39ff14; }
 </style>
 </head>
 <body>
@@ -179,6 +183,38 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
       <label for="clean"><input id="clean" type="checkbox" checked> Clean mode (recording mein buttons nahi dikhenge)</label>
     </div>
 
+    <div class="live">
+      <h2>TikTok Live mode</h2>
+      <p class="tip">Pehle server chalao (README dekho), phir yahan shuru karo. Jo bhi comment, like, gift ya join kare, uski photo aur naam apne aap game mein aa jaata hai. Lobby timer khatam hote hi race khud shuru hoti hai, aur result ke baad agla round khud chalu hota hai.</p>
+      <div class="grid3">
+        <label class="f" for="liveUrl">Server address
+          <input id="liveUrl" type="text" value="http://localhost:8080">
+        </label>
+        <label class="f" for="lobbyLen">Lobby time
+          <select id="lobbyLen">
+            <option value="20">20 second</option>
+            <option value="45">45 second</option>
+            <option value="60" selected>60 second</option>
+            <option value="90">90 second</option>
+            <option value="120">120 second</option>
+          </select>
+        </label>
+        <label class="f" for="maxPlayers">Max players
+          <select id="maxPlayers">
+            <option value="30">30</option>
+            <option value="60" selected>60</option>
+            <option value="100">100</option>
+            <option value="150">150</option>
+          </select>
+        </label>
+      </div>
+      <div class="checks">
+        <label for="keepPlayers"><input id="keepPlayers" type="checkbox" checked> Purane players agle round mein bhi rakho</label>
+      </div>
+      <button class="primary" id="liveStart" type="button">TikTok Live game shuru karo</button>
+      <p class="live-status" id="liveStatus">Abhi connect nahi hai.</p>
+    </div>
+
     <div class="row">
       <button class="ghost" id="examples" type="button">36 example players daalo</button>
       <button class="ghost" id="clear" type="button">Sab hatao</button>
@@ -214,13 +250,14 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     'China', 'Germany', 'Ireland', 'England', 'Egypt', 'France', 'Netherlands', 'Sweden', 'Pakistan', 'Romania', 'Chile', 'Scotland'];
   var stages = [];
   var roster = [], nextId = 1;
+  var live = { on: false, es: null, status: '', players: [], racing: [], late: [], seen: {}, lobbyT: 0, len: 60, min: 2, max: 60, keep: true, lastName: '', lastT: 0, round: 0 };
   var phase = 'idle', titleT = 0, simT = 0, acc = 0, cam = 0, gateOn = true;
   var firstT = null, firstBall = null, margin = null, doneN = 0, endT = 0, bannerStage = -1, bannerT = 0, lastBump = 0;
   var course = null, balls = [], parts = [], R = 13, raf = 0, last = 0, audio = null, cfg = { show: '', ep: '', g: 760 };
 
   function clamp(a, b, v) { return Math.max(a, Math.min(b, v)); }
   function rnd(a, b) { return a + Math.random() * (b - a); }
-  function initials(n) { return (n || '?').slice(0, 2).toUpperCase(); }
+  function initials(n) { return Array.from(n || '?').slice(0, 2).join('').toUpperCase(); }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = (Math.random() * (i + 1)) | 0, t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
   /* ---------- roster ---------- */
@@ -428,6 +465,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
   /* ---------- game flow ---------- */
   function startGame() {
     if (roster.length < 2) return;
+    live.on = false;
     cfg.show = ($('showname').value || '').trim().toUpperCase() || 'PIC LEAGUE';
     cfg.ep = ($('episode').value || '').trim().toUpperCase();
     cfg.g = +$('speed').value;
@@ -450,7 +488,95 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     raf = requestAnimationFrame(frame);
     musicStart();
   }
+  /* ---------- TikTok live: lobby, auto-join, auto-start ---------- */
+  var lastJoinBeep = 0;
+  function setLiveStatus(t, ok) {
+    live.status = t;
+    var el = $('liveStatus'); el.textContent = t; el.className = 'live-status' + (ok ? ' ok' : '');
+  }
+  function newPlayer(ev) {
+    var p = { id: nextId++, uid: String(ev.id), name: Array.from(String(ev.name || ev.id)).slice(0, 16).join(''), img: null, src: '', color: palette[(nextId - 1) % palette.length] };
+    if (ev.pic && /^(https?:|data:image)/.test(ev.pic)) {
+      var im = new Image();
+      im.referrerPolicy = 'no-referrer';
+      im.onload = function () { p.img = im; };
+      im.onerror = function () {};
+      im.src = ev.pic;
+    }
+    return p;
+  }
+  function spawnBall(p) {
+    balls.push({ p: p, x: rnd(WL + R + 4, WR - R - 4), y: rnd(190, 330), vx: rnd(-60, 60), vy: 0, r: R, done: false, gone: false, fade: 0, finishT: 0, still: 0 });
+  }
+  function handleLive(d) {
+    if (d.type === 'status') { setLiveStatus(d.text, d.ok); return; }
+    if (d.type !== 'join' || !d.id) return;
+    var id = String(d.id);
+    if (live.seen[id]) return;
+    if (phase === 'lobby') {
+      if (live.players.length >= live.max) return;
+      live.seen[id] = 1;
+      var p = newPlayer(d);
+      live.players.push(p); spawnBall(p);
+      live.lastName = p.name; live.lastT = 2.5;
+      var now = performance.now();
+      if (now - lastJoinBeep > 140) { lastJoinBeep = now; beep(880, 0.05, 'sine', 0.03); }
+    } else if (live.on && live.late.length < live.max) {
+      live.seen[id] = 1;
+      live.late.push(newPlayer(d));
+    }
+  }
+  function connectLive() {
+    var base = ($('liveUrl').value || '').trim().replace(/\/+$/, '');
+    if (live.es) { live.es.close(); live.es = null; }
+    setLiveStatus('Server se connect ho raha hai...', false);
+    try {
+      var es = new EventSource(base + '/events');
+      live.es = es;
+      es.onopen = function () { setLiveStatus('Server se connect ho gaya', true); };
+      es.onerror = function () { setLiveStatus('Server nahi mil raha (' + base + '). Dobara try kar raha hoon...', false); };
+      es.onmessage = function (e) { try { handleLive(JSON.parse(e.data)); } catch (x) {} };
+    } catch (x) { setLiveStatus('Server address galat hai', false); }
+  }
+  function enterLobby() {
+    cfg.show = ($('showname').value || '').trim().toUpperCase() || 'PIC LEAGUE';
+    cfg.ep = ($('episode').value || '').trim().toUpperCase();
+    cfg.g = +$('speed').value;
+    live.len = +$('lobbyLen').value; live.max = +$('maxPlayers').value; live.keep = $('keepPlayers').checked;
+    initAudio();
+    var prev = live.round === 0 ? [] : (live.keep ? live.racing.concat(live.late) : live.late);
+    live.players = prev.slice(0, live.max); live.racing = []; live.late = []; live.seen = {};
+    live.players.forEach(function (p) { live.seen[p.uid] = 1; });
+    live.round++; live.lobbyT = 0; live.lastT = 0;
+    R = clamp(14, 24, 130 / Math.sqrt(live.max));
+    course = buildCourse(R);
+    balls = []; live.players.forEach(spawnBall);
+    parts = []; phase = 'lobby'; titleT = 0; simT = 0; acc = 0; cam = 0; gateOn = true;
+    firstT = null; firstBall = null; margin = null; doneN = 0; endT = 0; bannerStage = -1; bannerT = 0;
+    $('setup').hidden = true; $('stage').hidden = false; $('bar').hidden = $('clean').checked;
+    cancelAnimationFrame(raf);
+    last = performance.now();
+    raf = requestAnimationFrame(frame);
+    musicStart();
+  }
+  function beginRace() {
+    var n = balls.length;
+    if (n < 2) return;
+    R = clamp(14, 24, 130 / Math.sqrt(n));
+    course = buildCourse(R);
+    balls.forEach(function (b) { b.r = R; });
+    live.racing = live.players.slice(); live.late = [];
+    phase = 'title'; titleT = 0;
+  }
+  function stopLive() {
+    live.on = false;
+    if (live.es) { live.es.close(); live.es = null; }
+    setLiveStatus('Abhi connect nahi hai.', false);
+  }
+  function again() { if (live.on) enterLobby(); else startGame(); }
+
   function backToMenu() {
+    stopLive();
     cancelAnimationFrame(raf); phase = 'idle'; musicStop();
     $('stage').hidden = true; $('setup').hidden = false;
   }
@@ -565,11 +691,16 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
 
   function update(dt) {
     var i, b;
+    if (phase === 'lobby') {
+      if (live.lastT > 0) live.lastT -= dt;
+      if (balls.length >= live.min) live.lobbyT += dt;
+      if (balls.length >= 2 && (live.lobbyT >= live.len || (balls.length >= live.max && live.lobbyT >= 5))) beginRace();
+    }
     if (phase === 'title') {
       titleT += dt;
       if (titleT >= 3) { phase = 'race'; gateOn = false; beep(660, 0.25, 'triangle', 0.1); }
     }
-    if (phase === 'title' || phase === 'race') {
+    if (phase === 'title' || phase === 'race' || phase === 'lobby') {
       acc += dt;
       while (acc >= STEP) { step(STEP); acc -= STEP; }
       for (i = 0; i < balls.length; i++) {
@@ -584,10 +715,10 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
         var cap = Math.min(balls.length, 10);
         if (doneN >= cap || (firstT !== null && simT - firstT > 22)) { phase = 'results'; endT = 0; beep(784, 0.4, 'triangle', 0.1); }
       }
-    } else if (phase === 'results') { endT += dt; }
+    } else if (phase === 'results') { endT += dt; if (live.on && endT > 14) enterLobby(); }
 
     var tgt = 0;
-    if (phase !== 'title') {
+    if (phase !== 'title' && phase !== 'lobby') {
       var ly = null;
       for (i = 0; i < balls.length; i++) { b = balls[i]; if (!b.done && (ly === null || b.y > ly)) ly = b.y; }
       if (ly === null) ly = FINISH_Y + 300;
@@ -711,7 +842,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     balls.forEach(function (b) {
       if (b.gone || b.y < y0 - 30 || b.y > y1 + 30) return;
       avatar(b.p, b.x, b.y, b.r, b.done ? Math.max(0, 1 - b.fade / 1.2) : 1, 3, b.p.color);
-      if (!b.done && top[b.p.id] !== undefined && phase !== 'title') {
+      if (!b.done && top[b.p.id] !== undefined && phase !== 'title' && phase !== 'lobby') {
         label(b.p.name, b.x, b.y - b.r - 14, 14, top[b.p.id] === 0 ? '#ffe600' : '#ffffff');
       }
     });
@@ -742,6 +873,21 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
       ctx.font = s2 + 'px ' + ANTON; neonText(cfg.ep, W / 2, 205, '#ffe600', 24);
     }
     ctx.font = '600 26px Inter, sans-serif'; neonText(balls.length + ' players · is yours in?', W / 2, 272, '#ff2bd6', 10);
+  }
+  function drawLobby() {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '72px ' + ANTON; neonText('JOIN KARO!', W / 2, 650, '#39ff14', 26);
+    ctx.font = '600 24px Inter, sans-serif'; neonText('Comment \u00b7 Like \u00b7 Gift karo', W / 2, 702, '#ffffff', 10);
+    var line = balls.length < live.min ? 'Kam se kam ' + live.min + ' players chahiye' : 'Race shuru: ' + Math.max(0, Math.ceil(live.len - live.lobbyT)) + 's';
+    var sz = fit(line, 50, W - 40, ANTON);
+    ctx.font = sz + 'px ' + ANTON; neonText(line, W / 2, 760, '#ffe600', 18);
+    if (live.lastT > 0 && live.lastName) {
+      ctx.globalAlpha = clamp(0, 1, live.lastT * 2);
+      ctx.font = '700 24px Inter, sans-serif'; neonText('+ ' + live.lastName, W / 2, 352, '#00f0ff', 12);
+      ctx.globalAlpha = 1;
+    }
+    ctx.font = '600 14px Inter, sans-serif'; ctx.fillStyle = '#8d95b3';
+    ctx.fillText(live.status || '', W / 2, 940);
   }
   function drawBanner() {
     if (bannerT <= 0 || bannerStage < 0) return;
@@ -783,7 +929,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     }
     if (endT > 2) {
       ctx.textAlign = 'center'; ctx.font = '600 20px Inter, sans-serif'; ctx.fillStyle = '#8d95b3';
-      ctx.fillText('Tap karke dobara chalao', W / 2, 900);
+      ctx.fillText(live.on ? 'Agla round ' + Math.max(0, Math.ceil(14 - endT)) + ' second mein' : 'Tap karke dobara chalao', W / 2, 900);
     }
     ctx.globalAlpha = 1;
   }
@@ -796,7 +942,8 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     ctx.strokeStyle = 'rgba(0,240,255,0.06)'; ctx.lineWidth = 1;
     for (i = -(cam % 100); i < H; i += 100) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
     drawWorld(rank);
-    if (phase === 'title') drawTitleCard(); else drawHud(rank);
+    if (phase === 'title' || phase === 'lobby') drawTitleCard(); else drawHud(rank);
+    if (phase === 'lobby') drawLobby();
     drawBanner();
     drawPhoto();
     parts.forEach(function (p) {
@@ -814,10 +961,12 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
   }
 
   $('start').onclick = startGame;
-  $('again').onclick = startGame;
+  $('again').onclick = again;
+  $('liveStart').onclick = function () { live.on = true; live.round = 0; enterLobby(); connectLive(); };
+  if (typeof location !== 'undefined' && location.protocol === 'http:') $('liveUrl').value = location.origin;
   $('back').onclick = backToMenu;
   $('menuBtn').onclick = backToMenu;
-  cv.addEventListener('click', function () { if (phase === 'results' && endT > 1.5) startGame(); });
+  cv.addEventListener('click', function () { if (phase === 'results' && endT > 1.5) again(); });
   renderRoster();
 })();
 </script>
