@@ -1,0 +1,15 @@
+{
+  "name": "pic-league-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pic League: TikTok Live se viewers apne aap game mein join hote hain",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "tiktok-live-connector": "^2.0.0"
+  }
+}
