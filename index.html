@@ -141,6 +141,8 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
 .live h2 { font-family: var(--display); font-weight: 400; font-size: 1.5rem; letter-spacing: 0.03em; margin: 0; color: var(--hot); text-shadow: 0 0 12px var(--hot); }
 .live-status { margin: 0; font-size: 0.85rem; color: var(--muted); }
 .live-status.ok { color: #39ff14; }
+body.playing { padding: 0; }
+body.playing .frame { border-radius: 0; box-shadow: none; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -462,6 +464,35 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     return c;
   }
 
+  /* ---------- screen fit and fullscreen ---------- */
+  function goFull() {
+    try {
+      var d = document.documentElement, fn = d.requestFullscreen || d.webkitRequestFullscreen;
+      if (fn && !document.fullscreenElement && !document.webkitFullscreenElement) {
+        var r = fn.call(d, { navigationUI: 'hide' });
+        if (r && r.catch) r.catch(function () {});
+      }
+    } catch (e) {}
+  }
+  function leaveFull() {
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+  }
+  function fitScreen() {
+    var iw = window.innerWidth || 540, ih = window.innerHeight || 960;
+    var avail = ih - ($('bar').hidden ? 0 : 56);
+    H = clamp(960, 1250, Math.round(W * avail / iw / 2) * 2);
+    if (cv.width !== W) cv.width = W;
+    if (cv.height !== H) cv.height = H;
+    var f = cv.parentNode;
+    f.style.aspectRatio = W + ' / ' + H;
+    f.style.width = Math.floor(Math.min(iw, avail * W / H)) + 'px';
+  }
+  function showStage() {
+    $('setup').hidden = true; $('stage').hidden = false; $('bar').hidden = $('clean').checked;
+    document.body.classList.add('playing');
+    goFull(); fitScreen();
+  }
+
   /* ---------- game flow ---------- */
   function startGame() {
     if (roster.length < 2) return;
@@ -482,7 +513,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     });
     parts = []; phase = 'title'; titleT = 0; simT = 0; acc = 0; cam = 0; gateOn = true;
     firstT = null; firstBall = null; margin = null; doneN = 0; endT = 0; bannerStage = -1; bannerT = 0;
-    $('setup').hidden = true; $('stage').hidden = false; $('bar').hidden = $('clean').checked;
+    showStage();
     cancelAnimationFrame(raf);
     last = performance.now();
     raf = requestAnimationFrame(frame);
@@ -553,7 +584,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     balls = []; live.players.forEach(spawnBall);
     parts = []; phase = 'lobby'; titleT = 0; simT = 0; acc = 0; cam = 0; gateOn = true;
     firstT = null; firstBall = null; margin = null; doneN = 0; endT = 0; bannerStage = -1; bannerT = 0;
-    $('setup').hidden = true; $('stage').hidden = false; $('bar').hidden = $('clean').checked;
+    showStage();
     cancelAnimationFrame(raf);
     last = performance.now();
     raf = requestAnimationFrame(frame);
@@ -577,6 +608,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
 
   function backToMenu() {
     stopLive();
+    document.body.classList.remove('playing'); leaveFull();
     cancelAnimationFrame(raf); phase = 'idle'; musicStop();
     $('stage').hidden = true; $('setup').hidden = false;
   }
@@ -722,7 +754,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
       var ly = null;
       for (i = 0; i < balls.length; i++) { b = balls[i]; if (!b.done && (ly === null || b.y > ly)) ly = b.y; }
       if (ly === null) ly = FINISH_Y + 300;
-      tgt = clamp(0, CAM_MAX, ly - 430);
+      tgt = clamp(0, CAM_MAX, ly - Math.round(H * 0.45));
     }
     cam += (tgt - cam) * Math.min(1, dt * 3);
 
@@ -887,7 +919,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
       ctx.globalAlpha = 1;
     }
     ctx.font = '600 14px Inter, sans-serif'; ctx.fillStyle = '#8d95b3';
-    ctx.fillText(live.status || '', W / 2, 940);
+    ctx.fillText(live.status || '', W / 2, H - 20);
   }
   function drawBanner() {
     if (bannerT <= 0 || bannerStage < 0) return;
@@ -929,7 +961,7 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
     }
     if (endT > 2) {
       ctx.textAlign = 'center'; ctx.font = '600 20px Inter, sans-serif'; ctx.fillStyle = '#8d95b3';
-      ctx.fillText(live.on ? 'Agla round ' + Math.max(0, Math.ceil(14 - endT)) + ' second mein' : 'Tap karke dobara chalao', W / 2, 900);
+      ctx.fillText(live.on ? 'Agla round ' + Math.max(0, Math.ceil(14 - endT)) + ' second mein' : 'Tap karke dobara chalao', W / 2, H - 60);
     }
     ctx.globalAlpha = 1;
   }
@@ -966,7 +998,8 @@ h1 { text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 36px var(--hot); }
   if (typeof location !== 'undefined' && location.protocol === 'http:') $('liveUrl').value = location.origin;
   $('back').onclick = backToMenu;
   $('menuBtn').onclick = backToMenu;
-  cv.addEventListener('click', function () { if (phase === 'results' && endT > 1.5) again(); });
+  cv.addEventListener('click', function () { goFull(); if (phase === 'results' && endT > 1.5) again(); });
+  window.addEventListener('resize', function () { if (phase !== 'idle') fitScreen(); });
   renderRoster();
 })();
 </script>
